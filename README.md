@@ -23,6 +23,10 @@ your OSD, and a built-in web app on your phone lets you set it all up.
 
 No soldering to the camera, no cables to the camera, no app on your phone.
 
+<p align="center">
+  <a href="https://myaicloud.github.io/OpenSlate/"><b>→ Flash OpenSlate in your browser</b></a>
+</p>
+
 ## Why OpenSlate
 
 | | |
@@ -43,7 +47,7 @@ No soldering to the camera, no cables to the camera, no app on your phone.
 | **Flight controller** | Betaflight with **Custom Message OSD elements** and one free UART |
 | **Camera** | **DJI Osmo Action** or **GoPro HERO8 – HERO13** |
 | **Wiring** | 4 wires: 5 V, GND, TX, RX |
-| **To flash once** | A computer with [PlatformIO](https://platformio.org/) and a USB cable |
+| **To flash once** | A computer with Chrome or Edge and a USB data cable |
 
 > [!IMPORTANT]
 > Your Betaflight version needs **Custom Message OSD elements**
@@ -75,14 +79,24 @@ RX goes to TX.
 
 ### 3. Flash the firmware
 
+Open **[myaicloud.github.io/OpenSlate](https://myaicloud.github.io/OpenSlate/)**
+in Chrome or Edge, plug in the board and click **Install OpenSlate**. The page
+detects whether it is an ESP32-C3 or a classic ESP32 and flashes the right
+firmware. If the board is not found, hold **BOOT** while plugging it in.
+
+Later updates work over Wi-Fi from the web app (**System → Firmware update**);
+the update files are on the same page.
+
+<details>
+<summary>Prefer the command line? Build it yourself with PlatformIO</summary>
+
 ```bash
 git clone https://github.com/myaicloud/OpenSlate.git
 cd OpenSlate
 pio run -e esp32c3_release -t upload     # ESP32-C3
 pio run -e esp32dev_release -t upload    # classic ESP32
 ```
-
-Later updates work over Wi-Fi from the web app (**System → Firmware update**).
+</details>
 
 ### 4. Pair your camera
 
@@ -211,6 +225,11 @@ Commands are never toggles, so repeating one after a reconnect is always safe.
 | `esp32c3` / `esp32dev` | Bench builds with full serial logging |
 | `native` | Host unit tests (`pio test -e native`) |
 
+`python site/build.py` runs both release builds and writes the files for the
+web flasher (merged images and update files) to `site/firmware/`. The site
+itself is `site/index.html` with `site/manifest.json`, published from the
+`gh-pages` branch.
+
 Every pin in `src/config.h` is `#ifndef`-guarded, so a build flag overrides it:
 
 ```bash
@@ -313,6 +332,7 @@ Manual start and stop keep working.
 OpenSlate/
 ├── platformio.ini          ESP32-C3 / ESP32 builds, release builds, host tests
 ├── LICENSE, NOTICE         GPL-3.0 and attribution terms
+├── site/                   Web flasher page (GitHub Pages) and its build script
 ├── src/
 │   ├── main.cpp            Main loop
 │   ├── config.h            Pins, defaults, timings

@@ -79,3 +79,6 @@ htmlcov/
 # Local scratch files (build logs, helper scripts) - prefix with "_"
 /_*.txt
 /_*.py
+
+# Web flasher build output (published via the gh-pages branch)
+site/firmware/
