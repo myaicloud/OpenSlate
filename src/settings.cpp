@@ -1,0 +1,124 @@
+// ============================================================================
+// settings.cpp — NVS-backed persistent configuration
+// ============================================================================
+
+#include "settings.h"
+#include "cam_registry.h"
+#include <Preferences.h>
+
+static OpenSlateSettings _s;
+static Preferences _prefs;
+
+static void applyDefaults() {
+    _s.camera          = (CameraType)DEFAULT_CAMERA_TYPE;
+    _s.auxChannelIndex = DEFAULT_AUX_CHANNEL_INDEX;
+    _s.rcThresholdUs   = DEFAULT_RC_THRESHOLD_US;
+    _s.debounceMs      = DEFAULT_RC_DEBOUNCE_MS;
+    _s.recordOnArm     = DEFAULT_RECORD_ON_ARM;
+    _s.stopOnDisarm    = DEFAULT_STOP_ON_DISARM;
+    _s.scanAll         = DEFAULT_SCAN_ALL;
+    _s.wifiSwitchCh    = DEFAULT_WIFI_SWITCH_CH;
+    _s.apOffArmed      = DEFAULT_AP_OFF_ARMED;
+
+    strlcpy(_s.apSsid, WIFI_AP_DEFAULT_SSID, sizeof(_s.apSsid));
+    strlcpy(_s.apPass, WIFI_AP_DEFAULT_PASS, sizeof(_s.apPass));
+
+    // Explicit per-slot defaults (do NOT assume OsdSlotContent values are
+    // contiguous — DEFAULT_OSD_SLOT_1 + i breaks if the enum ever gaps).
+    _s.osdSlot[0] = DEFAULT_OSD_SLOT_1;
+    _s.osdSlot[1] = DEFAULT_OSD_SLOT_2;
+    _s.osdSlot[2] = DEFAULT_OSD_SLOT_3;
+    _s.osdSlot[3] = DEFAULT_OSD_SLOT_4;
+    _s.camCount = 0;
+    memset(_s.cams, 0, sizeof(_s.cams));
+}
+
+void settingsLoad() {
+    applyDefaults();
+
+    if (!_prefs.begin(NVS_NAMESPACE, false)) {
+        DBG("SETTINGS: NVS open failed — using defaults");
+        return;
+    }
+
+    _s.camera          = (CameraType)_prefs.getUChar("camera", _s.camera);
+    _s.auxChannelIndex = _prefs.getUChar("auxCh", _s.auxChannelIndex);
+    _s.rcThresholdUs   = _prefs.getUShort("thr", _s.rcThresholdUs);
+    _s.debounceMs      = _prefs.getUShort("deb", _s.debounceMs);
+    _s.recordOnArm     = _prefs.getBool("roa", _s.recordOnArm);
+    _s.stopOnDisarm    = _prefs.getBool("sod", _s.stopOnDisarm);
+    _s.scanAll         = _prefs.getBool("scanAll", _s.scanAll);
+    _s.wifiSwitchCh    = _prefs.getUChar("wifiCh", _s.wifiSwitchCh);
+    _s.apOffArmed      = _prefs.getBool("apOffArm", _s.apOffArmed);
+
+    char buf[65] = {0};
+    if (_prefs.getString("ssid", buf, sizeof(buf)) > 0) strlcpy(_s.apSsid, buf, sizeof(_s.apSsid));
+    buf[0] = 0;
+    if (_prefs.getString("apkey", buf, sizeof(buf)) > 0) strlcpy(_s.apPass, buf, sizeof(_s.apPass));
+
+    for (int i = 0; i < 4; i++) {
+        char key[8];
+        snprintf(key, sizeof(key), "slot%d", i);
+        uint8_t v = _prefs.getUChar(key, _s.osdSlot[i]);
+        if (v < OSD_SLOT_COUNT) _s.osdSlot[i] = v;
+    }
+
+    // Sanity clamps
+    if (_s.auxChannelIndex > 15)            _s.auxChannelIndex = 15;
+    if (_s.rcThresholdUs < 1200)            _s.rcThresholdUs = 1200;
+    if (_s.rcThresholdUs > 1800)            _s.rcThresholdUs = 1800;
+    if (_s.debounceMs < 50)                 _s.debounceMs = 50;
+    if (_s.debounceMs > 1000)               _s.debounceMs = 1000;
+    if (_s.wifiSwitchCh > 15 && _s.wifiSwitchCh != 255)
+                                            _s.wifiSwitchCh = 255;
+
+    _prefs.end();
+
+    // Saved camera registry lives in the same NVS namespace.
+    camRegistryLoad();
+
+    DBG("SETTINGS: Loaded (cam=%u aux=%u thr=%u deb=%u roa=%d)",
+        _s.camera, _s.auxChannelIndex, _s.rcThresholdUs, _s.debounceMs, _s.recordOnArm);
+}
+
+void settingsSave() {
+    if (!_prefs.begin(NVS_NAMESPACE, false)) {
+        DBG("SETTINGS: NVS open failed — not saved");
+        return;
+    }
+    _prefs.putUChar("camera", _s.camera);
+    _prefs.putUChar("auxCh", _s.auxChannelIndex);
+    _prefs.putUShort("thr", _s.rcThresholdUs);
+    _prefs.putUShort("deb", _s.debounceMs);
+    _prefs.putBool("roa", _s.recordOnArm);
+    _prefs.putBool("sod", _s.stopOnDisarm);
+    _prefs.putBool("scanAll", _s.scanAll);
+    _prefs.putUChar("wifiCh", _s.wifiSwitchCh);
+    _prefs.putBool("apOffArm", _s.apOffArmed);
+    _prefs.putString("ssid", _s.apSsid);
+    _prefs.putString("apkey", _s.apPass);
+
+    for (int i = 0; i < 4; i++) {
+        char key[8];
+        snprintf(key, sizeof(key), "slot%d", i);
+        _prefs.putUChar(key, _s.osdSlot[i]);
+    }
+
+    _prefs.end();
+    DBG("SETTINGS: Saved");
+}
+
+void settingsReset() {
+    // Zeroize secrets before overwriting (don't leave old PSK in RAM).
+    memset(_s.apPass, 0, sizeof(_s.apPass));
+    memset(_s.apSsid, 0, sizeof(_s.apSsid));
+    applyDefaults();
+}
+
+OpenSlateSettings& settingsGet() {
+    return _s;
+}
+
+const char* cameraTypeName(CameraType type) {
+    return (type == CAMERA_GOPRO) ? "GoPro" : "DJI Osmo";
+}
