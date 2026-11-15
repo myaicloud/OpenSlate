@@ -197,10 +197,12 @@
 #define WEB_SCAN_COOLDOWN_MS      15000
 
 // Default content of Betaflight Custom Message slots 1..4 (OsdSlotContent).
-#define DEFAULT_OSD_SLOT_1        OSD_SLOT_CAM_STATUS
-#define DEFAULT_OSD_SLOT_2        OSD_SLOT_REC_TIME
-#define DEFAULT_OSD_SLOT_3        OSD_SLOT_BATTERY
-#define DEFAULT_OSD_SLOT_4        OSD_SLOT_LINK
+// Fresh installs get the compact two-line layout: all-camera summary plus the
+// alert line that stays empty while everything is fine.
+#define DEFAULT_OSD_SLOT_1        OSD_SLOT_SUMMARY
+#define DEFAULT_OSD_SLOT_2        OSD_SLOT_ALERTS
+#define DEFAULT_OSD_SLOT_3        OSD_SLOT_OFF
+#define DEFAULT_OSD_SLOT_4        OSD_SLOT_OFF
 
 // Maximum characters per custom message (Betaflight MAX_NAME_LENGTH).
 #define OSD_MAX_TEXT_LEN          16
@@ -230,6 +232,13 @@
 
 // How often to push custom-message text to the FC (milliseconds).
 #define OSD_UPDATE_INTERVAL_MS      500
+
+// Alert line: each message stays this long before the next one is shown.
+#define OSD_ALERT_ROTATE_MS         1500
+// Alert line: "ALL STOPPED" is shown this long after recording ends.
+#define OSD_ALL_STOPPED_MS          5000
+// Alert line: camera battery at or below this percentage raises "<TAG> BAT n".
+#define OSD_LOW_CAM_BATT_PCT        15
 
 // Text types for MSP2_SET_TEXT (0x3007) — verified against Betaflight master:
 //   1 = PILOT_NAME   2 = CRAFT_NAME   3 = PID_PROFILE   4 = RATE_PROFILE

@@ -5,7 +5,7 @@
 //   GET  /                Web UI (PROGMEM)
 //   GET  /api/status      Live telemetry snapshot (JSON)
 //   POST /api/settings    Update + persist settings (JSON, capped at 2 KB)
-//   POST /api/camera      scan/select/remove/pair (scan throttled server-side)
+//   POST /api/camera      scan/select/remove/pair/label (scan throttled server-side)
 //   POST /api/command     {"cmd":"start"|"stop"|"reboot"}
 //   POST /api/msp         Read-only allowlisted MSP passthrough (no GPS)
 //   GET  /api/scan        Current scan results (RSSI-sorted)
@@ -172,24 +172,26 @@ static String jsonGetStr(const String &body, const char *key) {
 // Handlers
 // ──────────────────────────────────────────────────────────────────────────────
 
+// S09: escape a source string for safe embedding in JSON. Quotes, backslashes
+// and control characters become spaces, so any BLE advertised name keeps the
+// status JSON valid (a stray quote used to break the whole Dashboard).
+static void jsonEscape(const char *src, char *dst, size_t dstLen) {
+    if (!dst || dstLen == 0) return;
+    size_t o = 0;
+    for (size_t i = 0; src && src[i] && o + 1 < dstLen; i++) {
+        char c = src[i];
+        if (c == '"' || c == '\\' || (uint8_t)c < 0x20 || c == 0x7f) dst[o++] = ' ';
+        else dst[o++] = c;
+    }
+    dst[o] = '\0';
+}
+
 static void handleRoot() {
     // no-store: the UI is iterated quickly — never serve a stale cached copy.
     _server.sendHeader("Cache-Control", "no-store, must-revalidate");
     _server.sendHeader("X-Content-Type-Options", "nosniff");
     _server.sendHeader("X-Frame-Options", "DENY");
     _server.send_P(200, "text/html", INDEX_HTML);
-}
-
-// S09: escape a source string for safe embedding in JSON (quote + backslash).
-static void jsonEscape(const char *src, char *dst, size_t dstLen) {
-    size_t o = 0;
-    for (size_t i = 0; src[i] && o + 2 < dstLen; i++) {
-        char c = src[i];
-        if (c == '"' || c == '\\') dst[o++] = ' ';
-        else if ((uint8_t)c < 0x20) dst[o++] = ' ';
-        else dst[o++] = c;
-    }
-    dst[o] = '\0';
 }
 
 static void handleStatus() {
@@ -215,25 +217,17 @@ static void handleStatus() {
         for (uint8_t i = 0; i < cfg.camCount; i++) {
             const SavedCamera &c = cfg.cams[i];
             const char *nm = c.name[0] ? c.name : c.mac;
-            // Escape double quotes / backslashes in the name defensively.
             char safeName[sizeof(c.name)];
-            strlcpy(safeName, nm, sizeof(safeName));
-            for (char *q = safeName; *q; q++) {
-                if (*q == '"' || *q == '\\') {
-                    // +1 to move the NUL terminator too (else over-read).
-                    memmove(q + 1, q, strlen(q) + 1);
-                    *q = ' ';
-                    q++;
-                }
-            }
+            jsonEscape(nm, safeName, sizeof(safeName));
             o += snprintf(cams + o, sizeof(cams) - o,
-                          "%s{\"t\":%u,\"n\":\"%s\",\"m\":\"%s\",\"a\":%s,\"on\":%s}",
-                          i ? "," : "", c.type, safeName, c.mac,
+                          "%s{\"t\":%u,\"n\":\"%s\",\"m\":\"%s\",\"g\":\"%s\",\"a\":%s,\"on\":%s}",
+                          i ? "," : "", c.type, safeName, c.mac, c.tag,
                           c.active ? "true" : "false",
                           camSavedIsReady(i) ? "true" : "false");
             if (o >= sizeof(cams) - 8) break;
         }
-        o += snprintf(cams + o, sizeof(cams) - o, "]");
+        if (o < sizeof(cams) - 1) snprintf(cams + o, sizeof(cams) - o, "]");
+        else strlcpy(cams, "[]", sizeof(cams));   // never emit cut-off JSON
     }
 
     // Pending cams discovered in current scan (drained from BLE host task by
@@ -248,21 +242,15 @@ static void handleStatus() {
         o += snprintf(pending + o, sizeof(pending) - o, "[");
         for (uint8_t i = 0; i < n && o < sizeof(pending) - 80; i++) {
             const char *typeStr = (sorted[i]->type == CAMERA_GOPRO) ? "GoPro" : "DJI";
-            // Defensive name escape (rare but possible).
+            // Any nearby advertiser can land here: escape its name.
             char safeName[sizeof(sorted[i]->name)];
-            strlcpy(safeName, sorted[i]->name, sizeof(safeName));
-            for (char *q = safeName; *q; q++) {
-                if (*q == '"' || *q == '\\') {
-                    memmove(q + 1, q, strlen(q) + 1);  // include NUL
-                    *q = ' ';
-                    q++;
-                }
-            }
+            jsonEscape(sorted[i]->name, safeName, sizeof(safeName));
             o += snprintf(pending + o, sizeof(pending) - o,
                 "%s{\"mac\":\"%s\",\"n\":\"%s\",\"t\":\"%s\",\"r\":%d}",
                 i ? "," : "", sorted[i]->mac, safeName, typeStr, sorted[i]->rssi);
         }
         if (o < sizeof(pending) - 1) snprintf(pending + o, sizeof(pending) - o, "]");
+        else strlcpy(pending, "[]", sizeof(pending));
     }
 
     // Last connect-attempt error from the active backend (empty = no error).
@@ -540,6 +528,24 @@ static void handleCommand() {
 static void handleCameraPost() {
     String body = _server.arg("plain");
     if (!requireSaneBody(body)) return;
+
+    // {"label":i,"text":"STK"} — short OSD label. Touches no radio link, so
+    // it is allowed while armed. Normalised to A-Z/0-9, max 4 characters.
+    if (jsonHas(body, "label")) {
+        long idx = jsonGetNum(body, "label", -1);
+        String text = jsonGetStr(body, "text");
+        if (idx < 0 || idx >= MAX_SAVED_CAMERAS ||
+            !camRegistrySetTag((uint8_t)idx, text.c_str())) {
+            sendJsonError("invalid camera index");
+            return;
+        }
+        char out[48];
+        snprintf(out, sizeof(out), "{\"ok\":true,\"tag\":\"%s\"}",
+                 settingsGet().cams[(uint8_t)idx].tag);
+        _server.send(200, "application/json", out);
+        return;
+    }
+
     // Flight safety: scans, pairing and slot changes disturb the live camera
     // links (shared radio, reconnects) — refuse them while armed.
     if (fcIsArmed()) { sendArmedError(); return; }
@@ -562,13 +568,12 @@ static void handleCameraPost() {
                          "{\"ok\":false,\"error\":\"scan cooldown, try again shortly\"}");
             return;
         }
-        if (!camPrepareUserScan()) {
+        if (!camRequestUserScan()) {
             _server.send(409, "application/json",
                          "{\"ok\":false,\"error\":\"BLE busy, try again shortly\"}");
             return;
         }
         _lastScanStartMs = now;
-        camStartUserScan();
         _server.send(200, "application/json", "{\"ok\":true}");
     } else if (jsonHas(body, "select")) {
         long idx = jsonGetNum(body, "select", -1);
@@ -722,11 +727,18 @@ static void handleMspPost() {
         sendJsonError("command not in read-only allowlist");
         return;
     }
+    // The wait below holds loop() for up to MSP_RESPONSE_TIMEOUT_MS: never
+    // in flight, where record switch and OSD must stay responsive.
+    if (fcIsArmed()) { sendArmedError(); return; }
 
-    // Flush any stale bytes, then send the request and wait for the reply.
-    // Safe here: we run inside loop()'s call stack (single-threaded), and the
-    // main-loop parser simply resyncs on '$' afterwards.
-    while (Serial1.available()) Serial1.read();
+    // Hand already-buffered frames to the FC status parser instead of
+    // throwing them away (that used to drop arm/status updates).
+    {
+        MspMessage stale{};
+        while (Serial1.available()) {
+            if (mspParseByte((uint8_t)Serial1.read(), stale)) fcStatusFeed(stale);
+        }
+    }
 
     mspSendRequest((uint8_t)cmd);
 
@@ -831,6 +843,54 @@ static void handleScanResults() {
 // Full fix (admin session + ECDSA signature) is roadmap — see README.
 // ──────────────────────────────────────────────────────────────────────────────
 
+/// The upload runs inside handleClient() and blocks loop() for its whole
+/// duration. Keep FC polling alive meanwhile so arming is still detected.
+static void pumpFcDuringUpload() {
+    fcStatusUpdate();
+    MspMessage msg{};
+    uint8_t budget = 128;
+    while (budget-- > 0 && Serial1.available()) {
+        if (mspParseByte((uint8_t)Serial1.read(), msg)) fcStatusFeed(msg);
+    }
+}
+
+/// #12: reject images for the other chip or the full flasher image before a
+/// single byte is written. Image header: magic 0xE9, chip id (u16 LE) at 12;
+/// an application image carries esp_app_desc_t (magic 0xABCD5432) at 32.
+static bool otaImageLooksRight(const uint8_t *buf, size_t len) {
+    if (len >= 1 && buf[0] == 0xFF) {
+        // The classic-ESP32 flasher image starts with 0x1000 bytes of padding.
+        snprintf(_otaError, sizeof(_otaError),
+                 "full flasher image: use the -update.bin file");
+        return false;
+    }
+    if (len < 36 || buf[0] != 0xE9) {
+        snprintf(_otaError, sizeof(_otaError), "not an ESP32 firmware file");
+        return false;
+    }
+#if CONFIG_IDF_TARGET_ESP32C3
+    const uint16_t wantChip = 0x0005;
+    const char *wantName = "ESP32-C3";
+#else
+    const uint16_t wantChip = 0x0000;
+    const char *wantName = "ESP32";
+#endif
+    uint16_t chip = (uint16_t)(buf[12] | (buf[13] << 8));
+    if (chip != wantChip) {
+        snprintf(_otaError, sizeof(_otaError),
+                 "wrong file: this board needs the %s update file", wantName);
+        return false;
+    }
+    uint32_t appMagic = (uint32_t)buf[32] | ((uint32_t)buf[33] << 8) |
+                        ((uint32_t)buf[34] << 16) | ((uint32_t)buf[35] << 24);
+    if (appMagic != 0xABCD5432UL) {
+        snprintf(_otaError, sizeof(_otaError),
+                 "full flasher image: use the -update.bin file");
+        return false;
+    }
+    return true;
+}
+
 static void handleOtaUpload() {
     HTTPUpload& upload = _server.upload();
 
@@ -868,6 +928,20 @@ static void handleOtaUpload() {
         }
     } else if (upload.status == UPLOAD_FILE_WRITE) {
         if (!_otaActive) return;  // begin already failed — drain silently
+        pumpFcDuringUpload();
+        if (fcIsArmed()) {
+            snprintf(_otaError, sizeof(_otaError), "FC armed during upload — aborted");
+            Update.abort();
+            _otaActive = false;
+            camSetOtaQuiet(false);
+            return;
+        }
+        if (_otaBytes == 0 && !otaImageLooksRight(upload.buf, upload.currentSize)) {
+            Update.abort();
+            _otaActive = false;
+            camSetOtaQuiet(false);
+            return;
+        }
         // Incremental size cap: never write past free sketch space.
         if (_otaBytes + upload.currentSize > _otaMaxBytes) {
             snprintf(_otaError, sizeof(_otaError), "image too large");
@@ -1013,6 +1087,14 @@ void webStart() {
 
     strlcpy(_ipStr, localIp.toString().c_str(), sizeof(_ipStr));
 
+#if CONFIG_IDF_TARGET_ESP32C3
+    // ESP32-C3 "Super Mini" boards: at the default ~20 dBm the mismatched chip
+    // antenna radiates almost nothing and the AP is invisible to phones even
+    // though softAP() reports success. 8.5 dBm is the widely used fix and is
+    // plenty for a phone next to the quad.
+    WiFi.setTxPower(WIFI_POWER_8_5dBm);
+#endif
+
     // Captive DNS: every hostname resolves to us.
     _dns.stop();
     _dns.setErrorReplyCode(DNSReplyCode::NoError);
@@ -1084,8 +1166,19 @@ void webUpdate() {
         WebDeferredAction action = _deferredAction;
         _deferredAction = WEB_DEFER_NONE;
         if (action == WEB_DEFER_REBOOT) {
-            DBG("WEB: deferred reboot");
-            ESP.restart();
+            if (fcIsArmed()) {
+                // Never reboot an armed quad: hold the reboot until disarm.
+                _deferredAction = WEB_DEFER_REBOOT;
+                _deferredAtMs   = millis();
+                static uint32_t lastNote = 0;
+                if (millis() - lastNote > 5000) {
+                    lastNote = millis();
+                    DBG("WEB: reboot held until the FC disarms");
+                }
+            } else {
+                DBG("WEB: deferred reboot");
+                ESP.restart();
+            }
         } else if (action == WEB_DEFER_AP_RESTART) {
             DBG("WEB: deferred AP restart (new credentials)");
             // webStart() early-returns while _up — stop first so new creds apply.

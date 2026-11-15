@@ -19,6 +19,7 @@
 
 #include "cam_registry.h"
 #include "camera_manager.h"
+#include "osd_status.h"
 #include <Preferences.h>
 #include <freertos/FreeRTOS.h>
 
@@ -75,6 +76,8 @@ static void persist() {
         prefs.putString(key, s.cams[i].mac);
         snprintf(key, sizeof(key), "cN%d", i);
         prefs.putString(key, s.cams[i].name);
+        snprintf(key, sizeof(key), "cG%d", i);
+        prefs.putString(key, s.cams[i].tag);
         snprintf(key, sizeof(key), "cA%d", i);
         prefs.putBool(key, s.cams[i].active);
     }
@@ -105,6 +108,9 @@ void camRegistryLoad() {
         snprintf(key, sizeof(key), "cN%d", i);
         String n = prefs.getString(key, "");
         strlcpy(s.cams[s.camCount].name, n.c_str(), sizeof(s.cams[i].name));
+        snprintf(key, sizeof(key), "cG%d", i);
+        String g = prefs.getString(key, "");
+        osdNormaliseTag(g.c_str(), s.cams[s.camCount].tag, sizeof(s.cams[i].tag));
         snprintf(key, sizeof(key), "cA%d", i);
         s.cams[s.camCount].active = prefs.getBool(key, false);
         s.camCount++;
@@ -189,6 +195,7 @@ bool camRegistrySave(uint8_t type, const char *mac, const char *name) {
     c.active = false;            // Don't auto-activate; user picks later
     strlcpy(c.mac,  mac,  sizeof(c.mac));
     strlcpy(c.name, name && *name ? name : mac, sizeof(c.name));
+    c.tag[0] = '\0';            // OSD falls back to "C<n>" until the user names it
     persist();
     DBG("REGISTRY: saved %s (%s) — user-approved",
         c.name, c.mac);
@@ -255,5 +262,14 @@ bool camRegistryRemove(uint8_t index) {
         }
     }
     persist();
+    return true;
+}
+
+bool camRegistrySetTag(uint8_t index, const char *tag) {
+    OpenSlateSettings &s = settingsGet();
+    if (index >= s.camCount) return false;
+    osdNormaliseTag(tag, s.cams[index].tag, sizeof(s.cams[index].tag));
+    persist();
+    DBG("REGISTRY: OSD label of %s = '%s'", s.cams[index].mac, s.cams[index].tag);
     return true;
 }

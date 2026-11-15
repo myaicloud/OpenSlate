@@ -39,8 +39,10 @@ enum OsdSlotContent : uint8_t {
     OSD_SLOT_FC_BATT    = 5,   // "FC 15.8V"
     OSD_SLOT_ARM_STATE  = 6,   // "ARMED" / "DISARMED"
     OSD_SLOT_CAM_COUNT  = 7,   // "CAMS 2/2" (ready / assigned)
+    OSD_SLOT_SUMMARY    = 8,   // "CAM 2/2 85 62" / "R2/2 85 62 02:41" (all cams)
+    OSD_SLOT_ALERTS     = 9,   // "" or the most important pilot message
 
-    OSD_SLOT_COUNT      = 8,
+    OSD_SLOT_COUNT      = 10,
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -54,6 +56,7 @@ struct SavedCamera {
     bool    active;            // The one the ESP32 should connect to
     char    mac[18];           // "AA:BB:CC:DD:EE:FF"
     char    name[24];          // Advertised name (may be empty)
+    char    tag[5];            // Short OSD label, A-Z/0-9 (empty = "C<n>")
 };
 
 // ──────────────────────────────────────────────────────────────────────────────

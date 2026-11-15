@@ -20,6 +20,9 @@ static const uint32_t kFcLinkLostMs = 5000;
 static const uint32_t kFcAliveWindowMs = 2000;
 // Gap between one-shot identity requests at boot.
 static const uint32_t kIdentityStepGapMs = 300;
+// Identity still unanswered while the FC talks: ask again this often (FC
+// booted after the ESP32, or the replies were lost).
+static const uint32_t kIdentityRetryMs = 5000;
 // MSP_STATUS minimum: cycle(2) + i2cErr(2) + sensors(2) + flags(4) + profile(1).
 static const uint8_t kMspStatusMinLen = 11;
 // MSP_ANALOG minimum: vbat(1) + mAh(2) + rssi(2).
@@ -41,6 +44,7 @@ static int8_t   _armBitIndex       = -1;     // -1 = unknown yet
 static bool     _identityDone      = false;
 static uint32_t _lastIdentityReq   = 0;
 static uint8_t  _identityStep      = 0;
+static uint32_t _identityDoneMs    = 0;
 
 static char _apiVersion[10]  = {0};
 static char _variant[6]      = {0};
@@ -200,11 +204,27 @@ void fcStatusUpdate() {
             mspSendRequest(kIdentityCmds[_identityStep]);
             if (++_identityStep >= sizeof(kIdentityCmds)) {
                 _identityDone = true;
+                _identityDoneMs = now;
                 // Kick off regular polls immediately afterwards.
                 _lastStatusPoll = _lastAnalogPoll = _lastBoxIdsPoll = 0;
             }
         }
         return;  // Don't interleave regular polls with identity discovery
+    }
+
+    // The FC answers status polls but its identity is still unknown: it was
+    // not listening during the boot sequence. Run the sequence again, but
+    // only on the ground and a few times: the sequence pauses status polls
+    // for ~1.2 s, which must never delay arm detection in flight.
+    static uint8_t identityRetries = 0;
+    if (_fc.fcAlive && !_fc.armed && _apiVersion[0] == '\0' &&
+        identityRetries < 5 && now - _identityDoneMs >= kIdentityRetryMs) {
+        identityRetries++;
+        DBG("FC: identity unanswered, asking again (%u/5)", identityRetries);
+        _identityDone    = false;
+        _identityStep    = 0;
+        _lastIdentityReq = 0;
+        return;
     }
 
     if (now - _lastStatusPoll >= MSP_STATUS_POLL_INTERVAL_MS) {

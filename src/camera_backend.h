@@ -20,6 +20,9 @@ public:
     virtual const CameraTelemetry& getTelemetry() const = 0;
     virtual bool isReady() const = 0;
     virtual const char* getLastError() const = 0;
+    /// True when the camera refused the last START (e.g. card full, busy).
+    /// Cleared by an accepted START, a STOP or a reconnect.
+    virtual bool recordRejected() const { return false; }
 };
 
 #endif // CAMERA_BACKEND_H

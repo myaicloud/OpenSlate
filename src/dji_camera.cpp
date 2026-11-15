@@ -41,6 +41,7 @@ public:
     const CameraTelemetry& getTelemetry() const override;
     bool isReady() const override;
     const char* getLastError() const override;
+    bool recordRejected() const override { return _recRejected; }
 
 private:
     void onConnect(NimBLEClient *client) override;
@@ -80,6 +81,8 @@ private:
     uint32_t _recStartMs = 0;
     bool _recActive = false;
     bool _lastCmdWasStart = false;
+    // Set on the host task when the camera answers a START with an error code.
+    std::atomic<bool> _recRejected{false};
     // E04: set by notifyCallback (NimBLE host task) when the camera reports
     // "pairing approved"; the ACK write itself happens in update() (loop()).
     std::atomic<bool> _approvalAckPending{false};
@@ -163,6 +166,7 @@ void DjiCamera::onDisconnect(NimBLEClient *pClient) {
     _telemetry.batteryTempC10 = INT16_MIN;
     _recActive = false;
     _recStartMs = 0;
+    _recRejected = false;
     _approvalAckPending = false;
     _wakePending = false;
     _seenCount = 0;   // host task owns _seen: re-log every frame type after a reconnect
@@ -799,7 +803,18 @@ void DjiCamera::notifyCallback(NimBLERemoteCharacteristic *pChar, uint8_t *pData
     if (flags == 0xC0 && cmdSet == 0x02 && cmdId == 0x02 && length >= 12) {
         uint8_t reply = pData[11];
         bleLogPush(BLE_LOG_DJI_REPLY, nullptr, 0, reply);
-        if (reply == 0x00) {
+        if (reply != 0x00 && _lastCmdWasStart) {
+            // The camera refused to record (busy, wrong mode, card full …).
+            // Undo the optimistic RECORDING so the OSD never claims a
+            // recording that does not exist; the manager retries the START.
+            _recRejected = true;
+            _recActive = false;
+            _recStartMs = 0;
+            _telemetry.state = CAM_STATE_STANDBY;
+            _telemetry.recTimeSeconds = 0;
+            snprintf(_lastError, sizeof(_lastError), "Camera refused to record (code 0x%02X)", reply);
+        } else if (reply == 0x00) {
+            if (_lastCmdWasStart) _recRejected = false;
             // Confirm local state from our last command direction.
             _telemetry.state = _lastCmdWasStart ? CAM_STATE_RECORDING : CAM_STATE_STANDBY;
             _telemetry.dataValid = true;
@@ -1067,9 +1082,13 @@ bool DjiCamera::sendStartRecord() {
         // Optimistic local state (confirmed by ACK in notifyCallback):
         // without this the OSD/dashboard stay UNKNOWN until the ACK arrives.
         _lastCmdWasStart = true;
-        _recActive = true;
-        _recStartMs = millis();
-        _telemetry.state = CAM_STATE_RECORDING;
+        // After a refusal, wait for the camera's OK instead of flipping the
+        // OSD back to REC on every retry.
+        if (!_recRejected) {
+            _recActive = true;
+            _recStartMs = millis();
+            _telemetry.state = CAM_STATE_RECORDING;
+        }
         _telemetry.dataValid = true;
         return true;
     }
@@ -1092,6 +1111,7 @@ bool DjiCamera::sendStopRecord() {
         _pControlChar->writeValue(packet, len, false)) {
         DBG("DJI: Sent Stop Record (0x02/0x02) to FFF5");
         _lastCmdWasStart = false;
+        _recRejected = false;
         _recActive = false;
         _telemetry.state = CAM_STATE_STANDBY;
         _telemetry.dataValid = true;

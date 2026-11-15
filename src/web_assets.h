@@ -243,6 +243,7 @@ select:disabled,input:disabled{opacity:.5;cursor:not-allowed}
 .item .t{flex:1;min-width:0}
 .item .t b{display:block;font-size:14.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .item .t span{display:block;font:12px var(--mono);color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item input.lbl{width:62px;height:34px;padding:0 8px;flex:none;font:600 13px var(--mono);text-transform:uppercase;text-align:center}
 .item .x{display:flex;gap:6px;align-items:center;flex:none}
 .item.active{background:var(--acc-s);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--acc) 40%,transparent)}
 .empty{padding:22px 12px;text-align:center;font-size:13.5px;color:var(--dim);border:1px dashed var(--line2);border-radius:var(--r2)}
@@ -484,6 +485,7 @@ footer.ft{text-align:center;font-size:12px;color:var(--faint);padding:24px 0 0}
     <header><h2>Live preview</h2></header>
     <div class="osd" id="osdPrev"></div>
     <p class="hint" style="margin-top:12px">Position each element in Betaflight Configurator &rarr; OSD (Custom Message 1&ndash;4). OpenSlate only supplies the text, up to 16 characters.</p>
+    <p class="hint"><b>All cameras summary</b> shows connected cameras and batteries on the ground (<span class="num">CAM 2/2 85 62</span>) and recording cameras with time in flight (<span class="num">R2/2 85 62 02:41</span>). <b>Pilot alerts</b> stays empty while everything is fine and shows only what needs action, such as <span class="num">STK NOT REC</span>. Name each camera under Camera &rarr; Saved cameras.</p>
   </div>
   <div class="card">
     <header><h2>Custom messages</h2></header>
@@ -564,7 +566,7 @@ const mmss=s=>{s=Math.max(0,s|0);const h=s/3600|0,m=(s/60|0)%60,x=s%60,p=n=>Stri
 const dur=s=>{s|=0;const d=s/86400|0,h=(s/3600|0)%24,m=(s/60|0)%60;return d?d+'d '+h+'h':h?h+'h '+m+'m':m?m+'m '+(s%60)+'s':s+'s'};
 const ch=i=>i<4?'CH'+(i+1):'AUX'+(i-3)+' (CH'+(i+1)+')';
 const BRAND=['DJI Osmo','GoPro'];
-const SLOT_NAMES=['Off','Camera status','Recording time','Camera battery','Link state','FC battery','Arm state','Camera count'];
+const SLOT_NAMES=['Off','Camera status','Recording time','Camera battery','Link state','FC battery','Arm state','Camera count','All cameras summary','Pilot alerts'];
 const SCAN_MS=5000, COOLDOWN_MS=15000;
 
 let S=null, armed=false, fails=0, pollT=0, inflight=false, again=false;
@@ -693,10 +695,12 @@ function renderCams(){
     :'<div class="empty">No camera selected. Pair one below.</div>');
   $('camCount').textContent=list.length+' / 4';
   const online=new Set((S.pending_cams||[]).map(p=>p.mac));
+  const ae=document.activeElement;if(ae&&ae.classList&&ae.classList.contains('lbl')&&$('camList').contains(ae))return;
   setHTML($('camList'),list.length?list.map((x,i)=>{
     const tag=x.a?'<span class="tag acc">Active</span>':x.on?'<span class="tag ok">Ready</span>':online.has(x.m)?'<span class="tag">In range</span>':'';
     return '<div class="item'+(x.a?' active':'')+'">'+brandAv(x.t)+
       '<div class="t"><b>'+esc(x.n||x.m)+'</b><span>'+esc(x.m)+'</span></div><div class="x">'+tag+
+      '<input type="text" class="lbl" id="lbl'+i+'" data-lbl="'+i+'" maxlength="4" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="C'+(i+1)+'" value="'+esc(x.g||'')+'" aria-label="OSD label for '+esc(x.n||x.m)+'" title="Short name in the OSD (A-Z, 0-9)">'+
       (x.a?'':'<button class="btn sm" data-sel="'+i+'"'+(armed?' disabled':'')+'>Use</button>')+
       '<button class="btn sm ghost" data-forget="'+i+'" aria-label="Forget"'+(armed?' disabled':'')+'>&times;</button></div></div>';
   }).join(''):'<div class="empty">No saved cameras yet.</div>');
@@ -727,6 +731,15 @@ document.addEventListener('click',async e=>{
   }
   refresh();
 });
+document.addEventListener('change',async e=>{
+  const el=e.target;if(!el.dataset||el.dataset.lbl==null)return;
+  const v=el.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,4);el.value=v;
+  const j=await api('/api/camera',{label:+el.dataset.lbl,text:v});
+  if(j.ok){el.value=j.tag||'';toast(j.tag?'OSD label: '+j.tag:'OSD label reset to '+el.placeholder,'ok');}
+  else toast(j.error||'Save failed','err');
+  el.blur();refresh();
+});
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.dataset&&e.target.dataset.lbl!=null)e.target.blur();});
 $$('#brandSeg button').forEach(b=>b.onclick=()=>{brand=+b.dataset.b;syncBrand();});
 function syncBrand(){$$('#brandSeg button').forEach(b=>{b.setAttribute('aria-pressed',+b.dataset.b===brand);b.disabled=armed;});}
 $('swAll').onchange=e=>save({scanAll:e.target.checked},e.target.checked?'Showing all nearby devices':'Showing cameras only',[e.target]);

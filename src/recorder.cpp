@@ -29,6 +29,12 @@ static bool     _roaSuppress      = false;   // Manual stop while armed
 // stop, switch-off or disarm.
 static bool     _manualLatched    = false;
 
+// Manual (Web UI) stop while the record switch is ON. Without this latch the
+// next recorderUpdate() recomputes desired = switch and restarts recording at
+// once. Cleared by the next switch edge, the next arming or a manual start, so
+// the following flight is never left unrecorded.
+static bool     _manualStopLatched = false;
+
 // Desired state. The camera manager owns the per-camera pending command and
 // its retry backoff, so a camera that reconnects later still receives the
 // absolute START/STOP.
@@ -73,6 +79,7 @@ void recorderInit() {
     _roaLatched = false;
     _roaSuppress = false;
     _manualLatched = false;
+    _manualStopLatched = false;
     _desired = false;
     _lastArmed = false;
     _armValid = false;
@@ -104,6 +111,8 @@ void recorderUpdate() {
 
         // Explicit user intent via the switch always clears the RoA latch.
         clearRoaIntent();
+        if (_manualStopLatched) DBG("REC: manual stop released by switch");
+        _manualStopLatched = false;
     }
 
     // ── Arm-state edges ─────────────────────────────────────────────────
@@ -116,6 +125,10 @@ void recorderUpdate() {
 
         DBG("FC: %s", fc.armed ? "ARMED" : "DISARMED");
 
+        if (rising && _manualStopLatched) {
+            DBG("REC: manual stop released by arming");
+            _manualStopLatched = false;
+        }
         if (rising && cfg.recordOnArm && !_switchIsOn && !_roaSuppress) {
             DBG("REC: record-on-arm engaged");
             _roaLatched = true;
@@ -129,7 +142,7 @@ void recorderUpdate() {
     }
 
     // ── Compute desired state ───────────────────────────────────────────
-    bool newDesired = _switchIsOn || _roaLatched || _manualLatched;
+    bool newDesired = (_switchIsOn && !_manualStopLatched) || _roaLatched || _manualLatched;
 
     if (newDesired != _desired) {
         _desired = newDesired;
@@ -140,6 +153,7 @@ void recorderUpdate() {
 void recorderManualStart() {
     // Manual start: behave like a fresh desired=true edge.
     clearRoaIntent();
+    _manualStopLatched = false;
     _manualLatched = true;        // Survive the next recorderUpdate() recompute
     if (settingsGet().recordOnArm) {
         _roaLatched = true;       // Keep it running until switch-off/manual stop
@@ -151,6 +165,10 @@ void recorderManualStart() {
 void recorderManualStop() {
     clearRoaIntent();             // Drops the manual latch as well
     _desired = false;
+    if (_switchIsOn) {
+        _manualStopLatched = true;
+        DBG("REC: manual stop holds until the switch moves or the FC arms");
+    }
     // If armed with record-on-arm enabled and no stop-on-disarm, prevent an
     // immediate re-latch until the FC disarms or the switch is used.
     if (settingsGet().recordOnArm && fcGetTelemetry().armed &&

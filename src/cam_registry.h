@@ -48,6 +48,10 @@ bool camRegistrySelect(uint8_t index);
 /// becomes active (and its brand becomes the scan target).
 bool camRegistryRemove(uint8_t index);
 
+/// Set the short OSD label of a saved camera (normalised to A-Z/0-9, max 4
+/// characters; empty restores the "C<n>" fallback). Returns false on bad index.
+bool camRegistrySetTag(uint8_t index, const char *tag);
+
 /// True when `mac` belongs to a SAVED entry of exactly this type AND that
 /// entry is the active one — i.e. auto-connecting to it is allowed.
 bool camRegistryMayAutoConnect(uint8_t type, const char *mac);

@@ -33,6 +33,17 @@ uint8_t camConnectedCount();
 /// Number of cameras currently holding a connection slot (0..2).
 uint8_t camAssignedCount();
 bool camSavedIsReady(uint8_t saved);
+
+/// Live state of one saved camera (registry index), for the OSD summary.
+struct CamSavedStatus {
+    bool assigned = false;     // Holds a connection slot
+    bool ready = false;        // Link up, accepts commands
+    bool stopPending = false;  // A STOP is waiting to be delivered
+    bool recRejected = false;  // Camera refused the last START
+    CameraTelemetry tel;       // Snapshot of its telemetry
+};
+/// Fills `out` and returns true when the saved camera holds a slot.
+bool camSavedStatus(uint8_t saved, CamSavedStatus &out);
 const char* camGetLastError();
 
 /// Human-readable name of the active backend ("DJI Osmo" / "GoPro").
@@ -53,6 +64,9 @@ void camStartUserScan();
 /// Reserve the scanner for a user action; refuses while connecting or pairing.
 /// Stops an internal known-camera scan without affecting existing links.
 bool camPrepareUserScan();
+/// Start a user discovery scan now, or as soon as the BLE worker is free
+/// (never blocks). Returns false when it cannot run (OTA, pairing, no stack).
+bool camRequestUserScan();
 
 /// Disconnect both slots and suspend automatic connections until camKick/reboot.
 void camDisconnect();

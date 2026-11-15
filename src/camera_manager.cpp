@@ -111,6 +111,11 @@ static bool _connectionsEnabled = true;
 static bool _kickPending = false;
 static bool _selectedPending = false;
 static bool _knownScanning = false;
+// User discovery scan requested while the BLE worker was still busy; started
+// from camUpdate() as soon as it is free (instead of delay() in the handler).
+static bool _userScanPending = false;
+static uint32_t _userScanRequestMs = 0;
+static const uint32_t kUserScanWaitMs = 3000;
 static uint32_t _lastKnownScan = 0;
 static uint32_t _knownScanBackoff = BLE_RECONNECT_INTERVAL_MS;
 static uint8_t _visibleMask = 0;
@@ -364,6 +369,14 @@ static void updateSlotCommands() {
         bool ready = slot.backend->isReady();
         bool readyEdge = ready && !slot.wasReady;
         slot.wasReady = ready;
+        // The camera refused the START (busy, card full …): try again at the
+        // slow retry rate for as long as recording is wanted.
+        if (slot.pendingCmd == 0 && _recordingDesired && ready &&
+            slot.backend->recordRejected() &&
+            now - slot.lastAttemptMs >= BLE_RECONNECT_MAX_MS) {
+            slot.pendingCmd = 1;
+            slot.retryBackoffMs = BLE_RECONNECT_MAX_MS;
+        }
         if (slot.pendingCmd == 0) continue;
         if (readyEdge) {
             // Link just came back: send the deferred command now instead of
@@ -425,6 +438,16 @@ void camUpdate() {
     cpuStatsUpdate();
     for (uint8_t i = 0; i < CAMERA_CONNECTION_SLOTS; i++) {
         if (_slots[i].backend && savedIndex(_slots[i]) < 0) clearSlot(i);
+    }
+    if (_userScanPending) {
+        if (!bleWorkerBusy()) {
+            _userScanPending = false;
+            if (camPrepareUserScan()) camStartUserScan();
+            else DBG("CAM: deferred discovery refused (BLE busy)");
+        } else if (millis() - _userScanRequestMs >= kUserScanWaitMs) {
+            _userScanPending = false;
+            DBG("CAM: deferred discovery dropped, worker stayed busy");
+        }
     }
     if (!bleWorkerBusy()) {
         if (_kickPending) camKick();
@@ -589,13 +612,27 @@ void camStartUserScan() {
     }
 }
 
+bool camRequestUserScan() {
+    if (!_stackReady || camIsOtaQuiet()) return false;
+    for (uint8_t i = 0; i < CAMERA_CONNECTION_SLOTS; i++) {
+        if (_slots[i].backend && _slots[i].backend->getState() == BLE_AUTHENTICATING)
+            return false;   // never disturb a pairing in progress
+    }
+    if (bleWorkerBusy()) {
+        // A background search may hold the worker: ask it to end its slice
+        // and start the scan from camUpdate() once the worker is free.
+        bleLinkYield();
+        _userScanPending = true;
+        _userScanRequestMs = millis();
+        return true;
+    }
+    if (!camPrepareUserScan()) return false;
+    camStartUserScan();
+    return true;
+}
+
 bool camPrepareUserScan() {
     if (!_stackReady || camIsOtaQuiet()) return false;
-    // A background search may hold the worker for a long time: cancel it and
-    // give the worker a moment to come back before refusing the scan.
-    if (bleWorkerBusy() && bleLinkYield()) {
-        for (uint8_t i = 0; i < 40 && bleWorkerBusy(); i++) delay(10);
-    }
     if (bleWorkerBusy()) return false;
     if (_knownScanning) {
         NimBLEDevice::getScan()->stop();
@@ -630,6 +667,21 @@ bool camSavedIsReady(uint8_t saved) {
     for (uint8_t i = 0; i < CAMERA_CONNECTION_SLOTS; i++) {
         if (_slots[i].backend && savedIndex(_slots[i]) == saved)
             return _slots[i].backend->isReady();
+    }
+    return false;
+}
+
+bool camSavedStatus(uint8_t saved, CamSavedStatus &out) {
+    out = CamSavedStatus();
+    for (uint8_t i = 0; i < CAMERA_CONNECTION_SLOTS; i++) {
+        const CameraSlot &slot = _slots[i];
+        if (!slot.backend || savedIndex(slot) != (int8_t)saved) continue;
+        out.assigned    = true;
+        out.ready       = slot.backend->isReady();
+        out.stopPending = slot.pendingCmd < 0;
+        out.recRejected = slot.backend->recordRejected();
+        out.tel         = slot.backend->getTelemetry();   // copy
+        return true;
     }
     return false;
 }
