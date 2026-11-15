@@ -32,7 +32,7 @@ No soldering to the camera, no cables to the camera, no app on your phone.
 | | |
 |---|---|
 | **Never miss a flight** | Record on arm, stop on disarm. Or use any AUX switch. |
-| **Know it is recording** | `REC 85% 02:41` right in your OSD, plus camera battery and link state. |
+| **Know it is recording** | `R2/2 85 62 02:41` in your OSD: how many cameras record, each battery, recording time. A second line speaks up only when something needs you, like `STK NOT REC`. |
 | **Two cameras at once** | Copter cam and a stickcam (or a second angle) start and stop together. |
 | **Fast reconnect** | A stickcam out of range during the flight reconnects within seconds after landing and gets its STOP command right away. |
 | **Set up from your phone** | Join the OpenSlate Wi-Fi, the setup page opens by itself. No laptop, no internet. |
@@ -73,7 +73,7 @@ RX goes to TX.
 
 1. **Ports:** turn on **MSP** for that UART (115200 baud).
 2. **OSD:** place **Custom Message 1–4** where you want them. OpenSlate fills
-   in the text.
+   in the text. The default layout uses only Custom Message 1 and 2.
 3. **Radio:** if you want a record switch, put it on any AUX channel. No
    Betaflight mode needed.
 
@@ -85,7 +85,8 @@ detects whether it is an ESP32-C3 or a classic ESP32 and flashes the right
 firmware. If the board is not found, hold **BOOT** while plugging it in.
 
 Later updates work over Wi-Fi from the web app (**System → Firmware update**);
-the update files are on the same page.
+the update files are on the same page. The web app refuses a file that does not
+fit your board, so you cannot pick the wrong one by accident.
 
 <details>
 <summary>Prefer the command line? Build it yourself with PlatformIO</summary>
@@ -106,6 +107,8 @@ pio run -e esp32dev_release -t upload    # classic ESP32
 2. Open **Camera**, pick **DJI Osmo** or **GoPro**, tap **Scan**.
 3. Tap **Pair** next to your camera. Approve the prompt on the camera screen
    if one appears. That is needed only once.
+4. Give each saved camera a short OSD name, for example `QUAD` and `STK`
+   (up to 4 letters or digits). Without one, the OSD calls them `C1`, `C2`.
 
 Tip: no Wi-Fi at hand? Press the **BOOT** button on the board. OpenSlate pairs
 the nearest camera it does not know yet.
@@ -122,10 +125,13 @@ Open **Switch** and either pick your **record switch channel** or turn on
 ## What you see in your OSD
 
 Each of the four Custom Message elements shows what you choose in the
-**OSD** tab:
+**OSD** tab. A fresh install shows the two all-camera elements in Custom
+Message 1 and 2:
 
 | Choice | Example |
 |---|---|
+| All cameras summary | `CAM 2/2 85 62` on the ground · `R2/2 85 62 02:41` while recording |
+| Pilot alerts | empty while all is well · `STK NOT REC` · `STK LOST` · `ALL STOPPED` |
 | Camera status | `REC 85% 02:41` · `STBY 85%` · `CAM SCAN` |
 | Recording time | `REC 02:41` |
 | Camera battery | `BAT 85%` |
@@ -133,6 +139,24 @@ Each of the four Custom Message elements shows what you choose in the
 | FC battery | `FC 15.8V` |
 | Arm state | `ARMED` · `DISARMED` |
 | Camera count | `CAMS 2/2` (ready / assigned) |
+
+**All cameras summary** counts connected cameras on the ground and recording
+cameras in flight, followed by each camera's battery and the recording time.
+A missing camera shows `--`.
+
+**Pilot alerts** shows one message at a time, the most important first, and
+cycles every 1.5 s when there are several:
+
+| Message | Meaning |
+|---|---|
+| `STK REC FAIL` | The camera refused to start (card full, wrong mode). OpenSlate keeps retrying. |
+| `STK NOT REC` | Connected, but not recording although it should. |
+| `STK LOST` | No link while recording is wanted. |
+| `STK STOP WAIT` | Landed, but this camera has not received its STOP yet. Leave it on. |
+| `QUAD STILL REC` | Recording although it should be stopped. |
+| `STK BAT 12` | Camera battery at 15 % or lower. |
+| `FC NOLINK` | No data from the flight controller. |
+| `ALL STOPPED` | Shown for 5 s after landing: every camera stopped, switch them off. |
 
 ## Supported cameras
 
@@ -154,7 +178,7 @@ it.
 | Tab | What you do there |
 |---|---|
 | **Live** | Big record button, recording timer, camera battery, switch and arm state, OSD preview |
-| **Camera** | Pair, switch and forget cameras |
+| **Camera** | Pair, switch and forget cameras, set their short OSD names |
 | **Switch** | Record channel, threshold with a live marker of your switch, record on arm, Wi-Fi settings |
 | **OSD** | Choose what the four Custom Messages show |
 | **System** | Flight controller info, MSP console, firmware update over Wi-Fi, reboot |
@@ -185,6 +209,10 @@ crossed, and that your Betaflight version has Custom Message OSD elements. The
 
 By default the hotspot is off while the quad is armed. Disarm, and it comes
 back after a few seconds. If you set up a Wi-Fi switch channel, flip it on.
+
+On ESP32-C3 "Super Mini" boards the hotspot runs at reduced power (8.5 dBm),
+because their small antenna does not work at full power. Keep the phone within
+a few metres of the quad.
 </details>
 
 <details>
@@ -314,7 +342,7 @@ status registration for battery and encoding state.
 |---|---|
 | `GET /api/status` | Live status (JSON) |
 | `POST /api/settings` | Change and save settings |
-| `POST /api/camera` | `{"scan":true}` · `{"pair":{"mac":"…","type":0\|1}}` · `{"select":i}` · `{"remove":i}` |
+| `POST /api/camera` | `{"scan":true}` · `{"pair":{"mac":"…","type":0\|1}}` · `{"select":i}` · `{"remove":i}` · `{"label":i,"text":"STK"}` |
 | `POST /api/command` | `{"cmd":"start"\|"stop"\|"reboot"}` |
 | `POST /api/msp` | Read-only MSP passthrough (allowlisted commands) |
 | `GET /api/scan` | Current scan results |
@@ -341,6 +369,7 @@ OpenSlate/
 │   ├── fc_status.*         Arm state, FC battery and identity
 │   ├── recorder.*          Switch / arm / manual → record decision
 │   ├── osd_slots.*         Custom Message 1–4 content
+│   ├── osd_status.*        All-camera summary and pilot alert lines
 │   ├── camera_manager.*    Two camera slots, scans, command dispatch
 │   ├── ble_link.*          Reconnect search and connection tuning
 │   ├── dji_camera.*        DJI Osmo Action backend
@@ -350,7 +379,7 @@ OpenSlate/
 │   ├── wifiswitch.*        Hotspot on/off (switch, armed)
 │   ├── web_server.*        Hotspot, setup page, REST API, OTA
 │   └── web_assets.h        The web app
-└── test/                   Host unit tests (DUML, MSP, slots, backends)
+└── test/                   Host unit tests (DUML, MSP, slots, backends, OSD lines)
 ```
 </details>
 
@@ -364,6 +393,8 @@ OpenSlate/
   confirms recording.
 - On the DJI Osmo Action 2, recording time and SD card status are not
   available from the camera yet; the timer is counted by OpenSlate.
+- On DJI cameras, OpenSlate does not yet notice a recording that is started or
+  stopped on the camera itself.
 
 ## Roadmap
 
@@ -373,6 +404,7 @@ OpenSlate/
 - [x] Two cameras at once with fast reconnect
 - [x] Mobile web app, firmware update over Wi-Fi
 - [x] DJI battery in the OSD
+- [x] All-camera summary and pilot alerts in the OSD
 - [ ] Recording time and SD status straight from DJI cameras
 - [ ] Camera settings (resolution, mode) from the web app
 - [ ] Lightweight Betaflight settings panel

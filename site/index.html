@@ -307,36 +307,36 @@ footer .legal{flex-basis:100%;font-size:13.5px}
         <div class="pin" aria-hidden="true"></div>
         <span class="when">On the ground</span>
         <h3>Arm</h3>
-        <div class="readout"><span class="osdtxt">CAMS 2/2</span><span class="osdtxt r">REC 85% 00:00</span></div>
-        <p>Both cameras start together, without touching either of them.</p>
+        <div class="readout"><span class="osdtxt r">R2/2 85 91 00:00</span></div>
+        <p>Both cameras start together, without touching either of them. The alert line stays empty.</p>
       </li>
       <li class="away">
         <div class="pin" aria-hidden="true"></div>
         <span class="when">In the air, 2–8 min</span>
         <h3>Stickcam out of range</h3>
-        <div class="readout"><span class="osdtxt">CAMS 1/2</span><span class="osdtxt r">REC 84% 03:12</span></div>
+        <div class="readout"><span class="osdtxt r">R1/2 84 -- 03:12</span><span class="osdtxt">STK LOST</span></div>
         <p>The copter cam keeps recording. OpenSlate keeps listening for the stickcam at low radio duty.</p>
       </li>
       <li class="away">
         <div class="pin" aria-hidden="true"></div>
         <span class="when">Landed</span>
         <h3>Disarm</h3>
-        <div class="readout"><span class="osdtxt">CAMS 1/2</span><span class="osdtxt">STBY 82%</span></div>
-        <p>The copter cam stops at once. The STOP for the stickcam is kept until it is back.</p>
+        <div class="readout"><span class="osdtxt">CAM 1/2 82 --</span><span class="osdtxt">STK STOP WAIT</span></div>
+        <p>The copter cam stops at once. The STOP for the stickcam is kept until it is back, and the OSD tells you to leave it on.</p>
       </li>
       <li>
         <div class="pin" aria-hidden="true"></div>
         <span class="when">Walking back</span>
         <h3>Stickcam reconnects</h3>
-        <div class="readout"><span class="osdtxt">CAMS 2/2</span><span class="osdtxt">STBY 82%</span></div>
+        <div class="readout"><span class="osdtxt">CAM 2/2 82 90</span><span class="osdtxt">ALL STOPPED</span></div>
         <p>It gets its STOP right away. On the bench: about 2.4&nbsp;s from its first signal to ready.</p>
       </li>
       <li>
         <div class="pin" aria-hidden="true"></div>
         <span class="when">Done</span>
         <h3>Power down</h3>
-        <div class="readout"><span class="osdtxt">CAMS 2/2</span><span class="osdtxt">DISARMED</span></div>
-        <p><code>CAMS 2/2</code> means both cameras got their command. Switch them off.</p>
+        <div class="readout"><span class="osdtxt">CAM 2/2 82 90</span></div>
+        <p><code>ALL STOPPED</code> means every camera got its STOP. Switch them off.</p>
       </li>
     </ol>
     <p class="note">Two cameras at once is covered by software tests; the reconnect time was measured on the bench with one camera. There are no flight reports yet. If you fly it, <a href="https://github.com/myaicloud/OpenSlate/issues">tell us how it went</a>.</p>
@@ -372,6 +372,8 @@ footer .legal{flex-basis:100%;font-size:13.5px}
     <h2>Know it is recording before you take off.</h2>
     <div class="osdgrid">
       <div class="osdlist">
+        <div class="osdrow"><span>All cameras</span><b class="osdtxt">R2/2 85 62 02:41</b></div>
+        <div class="osdrow"><span>Pilot alerts</span><b class="osdtxt">STK NOT REC</b></div>
         <div class="osdrow"><span>Camera status</span><b class="osdtxt">REC 85% 02:41</b></div>
         <div class="osdrow"><span>Recording time</span><b class="osdtxt">REC 02:41</b></div>
         <div class="osdrow"><span>Camera battery</span><b class="osdtxt">BAT 85%</b></div>
@@ -382,6 +384,7 @@ footer .legal{flex-basis:100%;font-size:13.5px}
       <div class="osdnote">
         <h3>You choose what goes where</h3>
         <p>Place Custom Message 1–4 anywhere in the Betaflight OSD tab and pick their content in the OpenSlate web app. The text updates live.</p>
+        <p>Two elements are enough. <code>R2/2 85 62 02:41</code> tells you how many cameras record, their batteries and the time. The alert line stays empty until something needs you, then names the camera: <code>STK NOT REC</code>, <code>STK LOST</code>, <code>ALL STOPPED</code>.</p>
         <p>Your Betaflight build needs the Custom Message OSD elements. Betaflight 4.5 and older do not have them. In the OSD tab you will see four entries called <code>Custom Message 1</code> to <code>4</code>.</p>
       </div>
     </div>
@@ -455,7 +458,7 @@ footer .legal{flex-basis:100%;font-size:13.5px}
 
       <div class="installer" id="installer">
         <h3>Install OpenSlate</h3>
-        <p>Firmware <span class="mono" id="fwver">v2.1</span> for ESP32-C3 and ESP32 (4 MB). Needs Chrome, Edge or Opera on a computer.</p>
+        <p>Firmware <span class="mono" id="fwver">v2.2</span> for ESP32-C3 and ESP32 (4 MB). Needs Chrome, Edge or Opera on a computer.</p>
         <esp-web-install-button manifest="manifest.json">
           <button class="btn pri" slot="activate"><svg aria-hidden="true"><use href="#i-usb"/></svg>Install OpenSlate</button>
           <div class="warn" slot="unsupported">This browser cannot talk to USB devices. Open this page in Chrome, Edge or Opera on a computer.</div>
@@ -483,7 +486,7 @@ footer .legal{flex-basis:100%;font-size:13.5px}
       <details><summary>Do I need to solder anything to the camera?</summary><div><p>No. OpenSlate talks to your cameras over Bluetooth. Only the ESP32 is wired to the flight controller.</p></div></details>
       <details><summary>Which board should I buy?</summary><div><p>Any ESP32-C3 board ("Super Mini" or DevKitM-1) or a classic ESP32 DevKitC / WROOM-32 with 4 MB flash. The C3 Super Mini is the smallest and needs no USB driver.</p></div></details>
       <details><summary>Will Wi-Fi get in the way of my cameras in flight?</summary><div><p>By default the OpenSlate hotspot turns off when you arm and comes back a few seconds after you disarm, so Bluetooth has the radio to itself during the flight.</p></div></details>
-      <details><summary>How do I update later?</summary><div><p>Two ways. Flash again from this page: quickest, but it resets settings and paired cameras. Or keep everything and update from the OpenSlate web app under <b>System → Firmware update</b> with the update file for your board:</p><p><a href="firmware/openslate-esp32c3-update.bin" download>Update file for ESP32-C3</a> · <a href="firmware/openslate-esp32-update.bin" download>Update file for ESP32</a></p></div></details>
+      <details><summary>How do I update later?</summary><div><p>Two ways. Flash again from this page: quickest, but it resets settings and paired cameras. Or keep everything and update from the OpenSlate web app under <b>System → Firmware update</b> with the update file for your board. The web app refuses a file that does not fit your board.</p><p><a href="firmware/openslate-esp32c3-update.bin" download>Update file for ESP32-C3</a> · <a href="firmware/openslate-esp32-update.bin" download>Update file for ESP32</a></p></div></details>
       <details><summary>Can I use it commercially?</summary><div><p>Yes, under the GPL-3.0: anyone who passes OpenSlate on, including on a device they sell, must include the complete source code and keep the "OpenSlate by FPVRookie" attribution.</p></div></details>
     </div>
   </div>

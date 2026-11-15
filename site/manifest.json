@@ -1,6 +1,6 @@
 {
   "name": "OpenSlate",
-  "version": "v2.1",
+  "version": "v2.2",
   "new_install_prompt_erase": true,
   "new_install_improv_wait_time": 0,
   "builds": [
